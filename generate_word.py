@@ -218,8 +218,13 @@ def create_full_word_resume(json_filepath, output_filepath):
         add_tnr_heading(doc, t_proj)
         ml_header_done = False
         for proj in data['projects']:
-            name = proj['name']
-            desc = proj['description']
+            name = proj.get('name', '').strip()
+            desc = proj.get('description', '').strip()
+
+            # אם הפרויקט ריק או נמחק - דלג עליו לחלוטין ואל תדפיס נקודתיים
+            if not name:
+                continue
+
             is_ml = name.startswith(ML_PREFIX) or name[:1].isdigit()
 
             if is_ml:
@@ -234,9 +239,14 @@ def create_full_word_resume(json_filepath, output_filepath):
                 p = doc.add_paragraph()
                 p.paragraph_format.keep_with_next = True
                 add_tnr_run(p, name.rstrip(':') + ":", bold=True)
-                for part in desc.split('. '):
-                    if part.strip():
-                        add_bullet_point(doc, part, is_hebrew)
+                
+                # תמיכה גם בירידת שורה (Enter) וגם בנקודה ורווח
+                lines = [line.strip() for line in desc.replace('\r\n', '\n').split('\n') if line.strip()]
+                for line in lines:
+                    for part in line.split('. '):
+                        clean_part = part.strip().rstrip('.')
+                        if clean_part:
+                            add_bullet_point(doc, clean_part, is_hebrew)
 
     # --- ניסיון ושירות צבאי ---
     if 'experience' in data:
