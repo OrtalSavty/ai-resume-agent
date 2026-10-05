@@ -1,3 +1,5 @@
+# מנהל את שרת ה-Flask, הניתובים והממשק
+
 from flask import Flask, render_template_string, send_file, request
 import json
 import os
@@ -6,6 +8,7 @@ import threading
 import zipfile
 from docx2pdf import convert
 from generate_word import create_full_word_resume
+from ai_agent import generate_tailored_summary
 
 try:
     import pythoncom
@@ -14,7 +17,7 @@ except ImportError:
 
 app = Flask(__name__)
 
-#  עיצוב ומבנה הממשק
+# עיצוב ומבנה הממשק
 HTML_PAGE = """
 <!DOCTYPE html>
 <html dir="rtl" lang="he">
@@ -33,12 +36,14 @@ HTML_PAGE = """
         input, textarea, select { width: 100%; padding: 10px; border: 1px solid #f472b6; border-radius: 6px; box-sizing: border-box; font-family: inherit; font-size: 14px; }
         input:focus, textarea:focus, select:focus { outline: none; border-color: #db2777; box-shadow: 0 0 5px rgba(219, 39, 119, 0.3); }
         p { margin-top: 0; color: #555; }
+        .preview-box { background: white; border: 1px solid #f472b6; border-radius: 6px; padding: 14px; margin-top: 5px; line-height: 1.6; }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>מערכת חכמה לניהול והתאמת קורות חיים</h1>
         
+        <!-- אזור הפקת קורות חיים כלליים -->
         <div class="section">
             <h2>הפקת קורות חיים כלליים</h2>
             <p>הורדת גרסת הבסיס המלאה כפי שהיא שמורה במערכת.</p>
@@ -52,25 +57,50 @@ HTML_PAGE = """
             </form>
         </div>
 
+        <!-- אזור התאמה למשרה -->
         <div class="section">
             <h2>התאמה למשרה ספציפית</h2>
-            <p>הקלידי את פרטי המשרה והמערכת תתאים את קורות החיים במיוחד עבורה.</p>
-            <form action="/generate_tailored" method="post">
+            <p>הקלידי את פרטי המשרה והסוכן ישכתב את התקציר בהתאם לדרישות.</p>
+            <form action="/tailor" method="post">
                 <label>בחירת שפת קורות החיים:</label>
                 <select name="lang">
-                    <option value="he">עברית</option>
-                    <option value="en">אנגלית</option>
+                    <option value="he" {% if lang == 'he' %}selected{% endif %}>עברית</option>
+                    <option value="en" {% if lang == 'en' %}selected{% endif %}>אנגלית</option>
                 </select>
 
                 <label>שם המשרה המבוקשת:</label>
-                <input type="text" name="role" placeholder="למשל: מנתחת נתונים / מפתחת תוכנה" required>
+                <input type="text" name="role" value="{{ role or '' }}" placeholder="למשל: מנתחת נתונים / מפתחת תוכנה" required>
                 
-                <label>תיאור המשרה:</label>
-                <textarea name="jd" rows="4" placeholder="הדביקי לכאן את דרישות המשרה כדי שהמערכת תנתח אותן..."></textarea>
+                <label>תיאור המשרה ודרישות:</label>
+                <textarea name="jd" rows="4" placeholder="הדביקי לכאן את דרישות המשרה כדי שהסוכן ינתח אותן...">{{ jd or '' }}</textarea>
                 
-                <button class="btn" type="submit">התאם קורות חיים והורד קבצים</button>
+                <button class="btn" type="submit">התאם תקציר והצג השוואה</button>
             </form>
         </div>
+
+        <!-- בלוק הנראות: תצוגת השוואה והורדה (מופיע רק אחרי שהסוכן רץ) -->
+        {% if show_preview %}
+        <div class="section" style="border: 2px solid #db2777; background-color: #fff;">
+            <h2>השוואת תוצאות הסוכן עבור: {{ role }}</h2>
+            
+            <label>התקציר המקורי:</label>
+            <div class="preview-box" style="background-color: #fdf2f8; color: #666; font-size: 13.5px;">
+                {{ original_summary }}
+            </div>
+            
+            <label>התקציר המותאם החדש:</label>
+            <div class="preview-box" style="background-color: #fce7f3; color: #111; font-weight: 500; border-right: 4px solid #db2777;">
+                {{ tailored_summary }}
+            </div>
+            
+            <form action="/download_tailored" method="post">
+                <input type="hidden" name="lang" value="{{ lang }}">
+                <input type="hidden" name="role" value="{{ role }}">
+                <button class="btn" style="background-color: #9d174d;" type="submit">הורד קורות חיים מעודכנים (Word + PDF)</button>
+            </form>
+        </div>
+        {% endif %}
+
     </div>
 </body>
 </html>
@@ -111,45 +141,80 @@ def generate_general():
     package_files(output_zip, output_docx, output_pdf)
     return send_file(output_zip, as_attachment=True)
 
-@app.route('/generate_tailored', methods=['POST'])
-def generate_tailored():
-    try:
-        pythoncom.CoInitialize()
-    except Exception:
-        pass
-        
+# ניתוב 1: יצירת התקציר המותאם והצגתו בממשק
+@app.route('/tailor', methods=['POST'])
+def tailor_resume():
     lang = request.form.get('lang', 'he')
-    role = request.form.get('role', 'Target_Role')
+    role = request.form.get('role', '')
+    jd = request.form.get('jd', '')
     
-    active_master_file = 'master_resume_he.json' if lang == 'he' else 'master_resume.json'
-    
-    with open(active_master_file, 'r', encoding='utf-8') as f:
+    active_master = 'master_resume_he.json' if lang == 'he' else 'master_resume.json'
+    with open(active_master, 'r', encoding='utf-8') as f:
         data = json.load(f)
         
     original_summary = data.get('professional_summary', '')
     
-    # משנה את משפט הפתיחה בהתאם לשפה שנבחרה    
-    if lang == 'he':
-        data['professional_summary'] = f"מועמדת בעלת מוטיבציה גבוהה המכוונת למשרת {role}. " + original_summary
-    else:
-        data['professional_summary'] = f"Highly motivated candidate targeting the {role} position. " + original_summary
-    
-    tailored_file = f"resume_{role.replace(' ', '_')}.json"
-    with open(tailored_file, 'w', encoding='utf-8') as tf:
-        json.dump(data, tf, ensure_ascii=False, indent=2)
+    # שליפת המיומנויות והעברתן לסוכן
+    candidate_skills = json.dumps(data.get('skills', {}), ensure_ascii=False)
+    tailored_summary = generate_tailored_summary(original_summary, role, jd, candidate_skills, lang)
         
-    output_docx = f"Resume_Tailored.docx"
-    output_pdf = f"Resume_Tailored.pdf"
-    output_zip = f"Resume_Tailored_Files.zip"
-    
-    create_full_word_resume(tailored_file, output_docx)
+        
+    # שמירת נתוני המשרה המותאמים לקובץ זמני ייעודי
+    data['professional_summary'] = tailored_summary
+    tailored_filename = f"tailored_resume_{lang}.json"
+    with open(tailored_filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        
+    return render_template_string(
+        HTML_PAGE,
+        original_summary=original_summary,
+        tailored_summary=tailored_summary,
+        lang=lang,
+        role=role,
+        jd=jd,
+        show_preview=True
+    )
+
+
+import re
+
+# ניתוב 2: הורדת קובצי הוורד וה-PDF של הגרסה המותאמת
+@app.route('/download_tailored', methods=['POST'])
+def download_tailored():
     try:
-        convert(output_docx, output_pdf)
-    except Exception as e:
-        print("PDF Error:", e)
+        pythoncom.CoInitialize()
+    except Exception:
+        pass
+
+    lang = request.form.get('lang', 'he')
+    role = request.form.get('role', 'Tailored')
+    tailored_json = f"tailored_resume_{lang}.json"
+    
+    # ניקוי תווים שאסורים בשמות קבצים בווינדוס (כמו סלאשים, נקודותיים וסוגריים)
+    safe_role = re.sub(r'[\\/*?:"<>|()]', "", role).strip().replace(" ", "_")
+    if not safe_role:
+        safe_role = "Tailored"
+
+    output_docx = "Resume_Tailored.docx"
+    output_pdf = "Resume_Tailored.pdf"
+    zip_filename = f"Resume_{safe_role}_Files.zip"
+    
+    try:
+        create_full_word_resume(tailored_json, output_docx)
+        try:
+            convert(output_docx, output_pdf)
+        except Exception as e:
+            print("PDF Conversion Warning:", e)
+            
+        package_files(zip_filename, output_docx, output_pdf)
+        return send_file(zip_filename, as_attachment=True)
+    finally:
+        try:
+            pythoncom.CoUninitialize()
+        except Exception:
+            pass
         
-    package_files(output_zip, output_docx, output_pdf)
-    return send_file(output_zip, as_attachment=True)
+        
 
 def open_browser():
     webbrowser.open_new("http://127.0.0.1:5000")
