@@ -1,4 +1,4 @@
-# מנהל את שרת ה-Flask, הניתובים והממשק
+# מנהל את שרת ה-Flask, הניתובים, ממשק המשתמש והשיחה עם סוכן ה-AI
 
 from flask import Flask, render_template_string, send_file, request
 import json
@@ -9,7 +9,7 @@ import threading
 import zipfile
 from docx2pdf import convert
 from generate_word import create_full_word_resume
-from ai_agent import generate_tailored_summary
+from ai_agent import generate_tailored_summary, refine_tailored_summary
 
 try:
     import pythoncom
@@ -85,7 +85,7 @@ def smart_delete_item(data, search_text):
                 data['skills'][cat] = new_it
                 deleted = True
 
-    # 4. חיפוש בשאר הטקסטים (תמצית וכדומה)
+    # 4. חיפוש בתקציר
     for field in ['professional_summary']:
         if field in data and (clean_text in data[field] or search_text in data[field]):
             new_s = data[field].replace(search_text, "").replace(clean_text, "")
@@ -165,8 +165,65 @@ HTML_PAGE = """
         .alert-success { background-color: #dcfce7; border: 1px solid #86efac; color: #166534; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-weight: bold; text-align: center; }
         .alert-error { background-color: #fee2e2; border: 1px solid #fca5a5; color: #991b1b; padding: 12px; border-radius: 6px; margin-bottom: 20px; font-weight: bold; text-align: center; }
         .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+
+        /* מסך טעינה */
+        #loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(253, 242, 248, 0.88);
+            backdrop-filter: blur(4px);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+        }
+        .spinner {
+            width: 55px;
+            height: 55px;
+            border: 5px solid #fbcfe8;
+            border-top: 5px solid #db2777;
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+            margin-bottom: 18px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .loading-title {
+            font-size: 20px;
+            font-weight: bold;
+            color: #9d174d;
+            margin-bottom: 6px;
+        }
+        .loading-desc {
+            font-size: 14.5px;
+            color: #666;
+        }
     </style>
     <script>
+        function showLoading(title, desc, isDownload = false) {
+            document.getElementById('loading-title').innerText = title;
+            document.getElementById('loading-desc').innerText = desc;
+            document.getElementById('loading-overlay').style.display = 'flex';
+            
+            if (isDownload) {
+                setTimeout(function() {
+                    document.getElementById('loading-overlay').style.display = 'none';
+                }, 4500);
+            }
+        }
+
+        function syncSummaryForRefine() {
+            var currentText = document.getElementById('tailored_summary_textarea').value;
+            document.getElementById('hidden_current_summary').value = currentText;
+            showLoading('סוכן ה-AI מדייק את התקציר...', 'משכתב את התקציר בהתאם למשוב שלך...');
+        }
+
         function updateAddFormFields() {
             var sec = document.getElementById('target_section').value;
             document.getElementById('div_general_text').style.display = (sec === 'courses' || sec === 'summary') ? 'block' : 'none';
@@ -186,6 +243,13 @@ HTML_PAGE = """
     </script>
 </head>
 <body onload="updateAddFormFields()">
+
+    <div id="loading-overlay">
+        <div class="spinner"></div>
+        <div class="loading-title" id="loading-title">מעבד נתונים...</div>
+        <div class="loading-desc" id="loading-desc">אנא המתיני, הפעולה מתבצעת ברקע.</div>
+    </div>
+
     <div class="container">
         <h1>מערכת חכמה לניהול והתאמת קורות חיים</h1>
 
@@ -200,7 +264,7 @@ HTML_PAGE = """
         <div class="section">
             <h2>הפקת קורות חיים כלליים</h2>
             <p>הורדת גרסת הבסיס המלאה כפי שהיא שמורה במערכת.</p>
-            <form action="/generate_general" method="post">
+            <form action="/generate_general" method="post" onsubmit="showLoading('מפיק קורות חיים...', 'יוצר קובצי Word ו-PDF ואורז ל-ZIP...', true)">
                 <label>בחירת שפת קורות החיים:</label>
                 <select name="lang">
                     <option value="he">עברית</option>
@@ -214,7 +278,7 @@ HTML_PAGE = """
         <div class="section">
             <h2>התאמה למשרה ספציפית</h2>
             <p>הקלידי את פרטי המשרה והסוכן ישכתב את התקציר בהתאם לדרישות.</p>
-            <form action="/tailor" method="post">
+            <form action="/tailor" method="post" onsubmit="showLoading('סוכן ה-AI בעבודה...', 'מנתח את דרישות המשרה ומשכתב את התקציר בהתאמה אישית...')">
                 <label>בחירת שפת קורות החיים:</label>
                 <select name="lang">
                     <option value="he" {% if lang == 'he' %}selected{% endif %}>עברית</option>
@@ -231,25 +295,43 @@ HTML_PAGE = """
             </form>
         </div>
 
-        <!-- תצוגת השוואה והורדה -->
+        <!-- תצוגת השוואה, עריכה, שיחה והורדה -->
         {% if show_preview %}
         <div class="section" style="border: 2px solid #db2777; background-color: #fff;">
-            <h2>השוואת תוצאות הסוכן עבור: {{ role }}</h2>
+            <h2>השוואה, דיוק ועריכת תקציר עבור: {{ role }}</h2>
             
             <label>התקציר המקורי:</label>
-            <div class="preview-box" style="background-color: #fdf2f8; color: #666; font-size: 13.5px;">
+            <div class="preview-box" style="background-color: #fdf2f8; color: #666; font-size: 13.5px; line-height: 1.6;">
                 {{ original_summary }}
             </div>
             
-            <label>התקציר המותאם החדש:</label>
-            <div class="preview-box" style="background-color: #fce7f3; color: #111; font-weight: 500; border-right: 4px solid #db2777;">
-                {{ tailored_summary }}
-            </div>
+            <label style="margin-top: 15px;">התקציר המותאם (ניתן לערוך ידנית בתיבה זו):</label>
+            <textarea id="tailored_summary_textarea" form="download_form" name="tailored_summary" rows="5" style="background-color: #fce7f3; color: #111; font-weight: 500; border-right: 4px solid #db2777; font-size: 14px; line-height: 1.6;">{{ tailored_summary }}</textarea>
             
-            <form action="/download_tailored" method="post">
+            <!-- תיבת שיחה והכוונה לסוכן -->
+            <div style="margin-top: 18px; background-color: #fff0f5; padding: 16px; border-radius: 8px; border: 1px dashed #db2777;">
+                <label style="margin-top: 0; color: #9d174d; font-size: 14.5px;">רוצה להכווין את הסוכן? כתבי לו כאן מה לדייק:</label>
+                <p style="margin-bottom: 10px; font-size: 12.5px; color: #777;">למשל: "תקצר בחצי", "תדגיש יותר ניסיון ב-SQL"</p>
+                
+                <form action="/refine_summary" method="post" onsubmit="syncSummaryForRefine()">
+                    <input type="hidden" name="lang" value="{{ lang }}">
+                    <input type="hidden" name="role" value="{{ role }}">
+                    <input type="hidden" name="jd" value="{{ jd }}">
+                    <input type="hidden" name="original_summary" value="{{ original_summary }}">
+                    <input type="hidden" name="current_summary" id="hidden_current_summary" value="{{ tailored_summary }}">
+                    
+                    <div style="display: flex; gap: 10px;">
+                        <input type="text" name="feedback" placeholder="כתבי הנחיה לסוכן..." required style="flex: 1;">
+                        <button type="submit" class="btn btn-secondary" style="margin-top: 0; width: auto; white-space: nowrap; padding: 10px 20px;">דייק תקציר</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- טופס הורדת קורות חיים -->
+            <form id="download_form" action="/download_tailored" method="post" onsubmit="showLoading('מפיק קורות חיים מותאמים...', 'יוצר קובצי Word ו-PDF מעודכנים...', true)">
                 <input type="hidden" name="lang" value="{{ lang }}">
                 <input type="hidden" name="role" value="{{ role }}">
-                <button class="btn btn-secondary" type="submit">הורד קורות חיים מעודכנים (Word + PDF)</button>
+                <button class="btn" style="background-color: #9d174d; margin-top: 20px;" type="submit">הורד קורות חיים מעודכנים (Word + PDF)</button>
             </form>
         </div>
         {% endif %}
@@ -260,7 +342,7 @@ HTML_PAGE = """
             <p>שינויים שיתבצעו כאן יישמרו ישירות בתוך קובץ ה-JSON המקורי בתיקיית Resume.</p>
 
             <!-- כלי 1: חיפוש, החלפה ומחיקה -->
-            <form action="/edit_resume" method="post" style="margin-bottom: 25px;">
+            <form action="/edit_resume" method="post" style="margin-bottom: 25px;" onsubmit="showLoading('מעדכן נתונים...', 'מבצע החלפה או הסרה בקובץ המקור...')">
                 <input type="hidden" name="action_type" value="replace">
                 <h3 style="color: #9d174d; font-size: 16px; margin-bottom: 5px;">1. החלפה או הסרה של טקסט / פרויקט</h3>
                 
@@ -282,7 +364,7 @@ HTML_PAGE = """
             <hr style="border: 0; border-top: 1px dashed #f472b6; margin: 20px 0;">
 
             <!-- כלי 2: הוספת פריט חדש -->
-            <form action="/edit_resume" method="post">
+            <form action="/edit_resume" method="post" onsubmit="showLoading('מוסיף פריט חדש...', 'שומר את הפריט לצמיתות בקובץ המקור...')">
                 <input type="hidden" name="action_type" value="append">
                 <h3 style="color: #9d174d; font-size: 16px; margin-bottom: 5px;">2. הוספת פריט חדש לקורות החיים</h3>
 
@@ -305,13 +387,11 @@ HTML_PAGE = """
                     </div>
                 </div>
 
-                <!-- שדה לקורסים ותמצית -->
                 <div id="div_general_text">
                     <label id="lbl_general">שם הקורס להוספה:</label>
                     <input type="text" name="new_text" id="inp_general" placeholder="למשל: סוכני AI (נלקח הסמסטר)">
                 </div>
 
-                <!-- שדות למיומנות -->
                 <div id="div_skill_fields" style="display: none;">
                     <label>קטגוריית מיומנות (למשל: רקע טכני / שפות תכנות):</label>
                     <input type="text" name="skill_category" placeholder="למשל: רקע טכני (אם ריק - ישובץ בקטגוריה הראשית)">
@@ -320,7 +400,6 @@ HTML_PAGE = """
                     <input type="text" name="skill_item" placeholder="למשל: Docker, MongoDB">
                 </div>
 
-                <!-- שדות לפרויקט -->
                 <div id="div_project_fields" style="display: none;">
                     <label>שם הפרויקט:</label>
                     <input type="text" name="project_name" placeholder="למשל: מערכת ניתוח סנטימנט מבוססת AI">
@@ -403,6 +482,40 @@ def tailor_resume():
         show_preview=True
     )
 
+# ניתוב שיחה ודיוק מול סוכן ה-AI
+@app.route('/refine_summary', methods=['POST'])
+def refine_summary():
+    lang = request.form.get('lang', 'he')
+    role = request.form.get('role', '')
+    jd = request.form.get('jd', '')
+    original_summary = request.form.get('original_summary', '')
+    current_summary = request.form.get('current_summary', '')
+    feedback = request.form.get('feedback', '')
+
+    active_master = get_master_file(lang)
+    with open(active_master, 'r', encoding='utf-8') as f:
+        data = json.load(f)
+
+    candidate_skills = json.dumps(data.get('skills', {}), ensure_ascii=False)
+    refined_summary = refine_tailored_summary(current_summary, feedback, role, jd, candidate_skills, lang)
+
+    # עדכון קובץ ה-JSON הזמני המותאם
+    data['professional_summary'] = refined_summary
+    tailored_filename = os.path.join(OUTPUT_DIR, f"tailored_resume_{lang}.json")
+    with open(tailored_filename, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+    return render_template_string(
+        HTML_PAGE,
+        original_summary=original_summary,
+        tailored_summary=refined_summary,
+        lang=lang,
+        role=role,
+        jd=jd,
+        show_preview=True,
+        success_message=f"✓ הסוכן עדכן את התקציר בהתאם לבקשתך: '{feedback}'"
+    )
+
 @app.route('/download_tailored', methods=['POST'])
 def download_tailored():
     try:
@@ -414,6 +527,20 @@ def download_tailored():
     role = request.form.get('role', 'Tailored')
     tailored_json = os.path.join(OUTPUT_DIR, f"tailored_resume_{lang}.json")
     
+    # עדכון לפי מה שנמצא בתיבת הטקסט (למקרה של עריכה ידנית)
+    edited_summary = request.form.get('tailored_summary')
+    if edited_summary:
+        if os.path.exists(tailored_json):
+            with open(tailored_json, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        else:
+            with open(get_master_file(lang), 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        
+        data['professional_summary'] = edited_summary.strip()
+        with open(tailored_json, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+
     safe_role = re.sub(r'[\\/*?:"<>|()]', "", role).strip().replace(" ", "_")
     if not safe_role:
         safe_role = "Tailored"
@@ -454,7 +581,6 @@ def edit_resume():
         replace_text = request.form.get('replace_text', '').strip()
 
         if not replace_text:
-            # בקשת מחיקה מלאה
             was_deleted = smart_delete_item(data, find_text)
             if was_deleted:
                 with open(master_path, 'w', encoding='utf-8') as f:
@@ -463,7 +589,6 @@ def edit_resume():
             else:
                 error_msg = f"הטקסט '{find_text}' לא נמצא בקובץ. ודאי שהוא נכתב במדויק."
         else:
-            # בקשת החלפה
             updated_data = smart_replace_text(data, find_text, replace_text)
             if updated_data == data:
                 error_msg = f"הטקסט '{find_text}' לא נמצא לצורך החלפה."
@@ -544,8 +669,8 @@ def edit_resume():
     return render_template_string(HTML_PAGE, success_message=success_msg, error_message=error_msg)
 
 def open_browser():
-    webbrowser.open_new("http://127.0.0.1:5000")
+    webbrowser.open("http://127.0.0.1:5000")
 
 if __name__ == '__main__':
-    threading.Timer(1.0, open_browser).start()
+    threading.Timer(1.2, open_browser).start()
     app.run(port=5000)

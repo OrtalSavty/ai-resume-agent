@@ -4,3 +4,7 @@ __pycache__/generate_word.cpython-313.pyc
 __pycache__/ai_agent.cpython-313.pyc
 tailored_resume_en.json
 tailored_resume_he.json
+*.docx
+generated_resumes/Resume_General.pdf
+*.zip
+*.mp4

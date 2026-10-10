@@ -6,7 +6,7 @@
     "linkedin": "https://www.linkedin.com/in/ortal-savty",
     "github": "https://github.com/OrtalSavty"
   },
-  "professional_summary": "Honor student (GPA: 90) in third year of Information Systems B.Sc, with ~1 year remaining (expected graduation: October 2027).\nA tech enthusiast with a strong business orientation, offering hands-on experience in CRM system operations. Fast and independent learner with ability to master new technologies. Available for student positions 2-3 days per week.",
+  "professional_summary": "Honor student (GPA: 90) in third year of Information Systems B.Sc, with ~1 year remaining (expected graduation: October 2027).\nA tech enthusiast with a strong business orientation, offering hands-on experience in CRM system operations. Fast and independent learner with ability to master new technologies. Available for student positions 3 days per week.",
   "education": [
     {
       "institution": "Yezreel Valley College",
@@ -22,11 +22,29 @@
     }
   ],
   "skills": {
-    "programming_languages": ["Python", "Java", "(OOP)", "SQL"],
-    "data_analysis": ["theoretical knowledge in statistics, statistical machine learning, Excel (full proficiency, formulas, VLOOKUP, Pivot Tables)"],
-    "tools": ["Prototyping with Axure (Good proficiency)", "CSS", "HTML", "JS", "Power BI"],
-    "software_development_and_ai": ["Software Architecture, Gemini AI Model Integration (Python)"],
-    "languages": ["Hebrew - Native", "English - Good Proficiency"]
+    "programming_languages": [
+      "Python",
+      "Java",
+      "(OOP)",
+      "SQL"
+    ],
+    "data_analysis": [
+      "theoretical knowledge in statistics, statistical machine learning, Excel (full proficiency, formulas, VLOOKUP, Pivot Tables)"
+    ],
+    "tools": [
+      "Prototyping with Axure (Good proficiency)",
+      "CSS",
+      "HTML",
+      "JS",
+      "Power BI"
+    ],
+    "software_development_and_ai": [
+      "Software Architecture, Gemini AI Model Integration (Python)"
+    ],
+    "languages": [
+      "Hebrew - Native",
+      "English - Good Proficiency"
+    ]
   },
   "projects": [
     {
@@ -36,6 +54,10 @@
     {
       "name": "Personal Financial Management System (Object Oriented Programming)",
       "description": "Development of a personal financial management system (OOP), utilizing visualization and report via Python\nTools and methodology: Clean architecture using Git for version management"
+    },
+    {
+      "name": "AI Resume Management & Tailoring System",
+      "description": "Developed a web application for managing resumes and dynamically tailoring content to specific job descriptions using LLMs.\r\nBuilt a real-time UI to edit and refine summaries with AI, alongside automated generation and export of styled Word and PDF documents"
     },
     {
       "name": "Data Analysis & Machine Learning Projects - 1. Telecom Customer Churn",

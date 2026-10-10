@@ -14,7 +14,7 @@ from docx2pdf import convert
 FONT = 'Times New Roman'
 ML_PREFIX = "Data Analysis & Machine Learning Projects - "
 
-# סדר האלמנטים בסכמה של Word (כדי להכניס תגיות במקום הנכון)
+# סדר האלמנטים בסכמה של Word 
 PPR_AFTER_BIDI = (
     'w:adjustRightInd', 'w:snapToGrid', 'w:spacing', 'w:ind', 'w:contextualSpacing',
     'w:mirrorIndents', 'w:suppressOverlap', 'w:jc', 'w:textDirection', 'w:textAlignment',
@@ -172,7 +172,7 @@ def create_full_word_resume(json_filepath, output_filepath):
         bullet_style.paragraph_format.space_before = Pt(0)
         bullet_style.paragraph_format.left_indent = Inches(0.25)
 
-    # --- כותרת ופרטי קשר ---
+    #  כותרת ופרטי קשר
     title_p = doc.add_paragraph()
     run = add_tnr_run(title_p, data['personal_info']['name'], bold=True, size=16)
     run.font.color.rgb = RGBColor(46, 116, 181)
@@ -185,13 +185,13 @@ def create_full_word_resume(json_filepath, output_filepath):
     add_tnr_run(contact_p, " | ")
     add_hyperlink(contact_p, "GitHub", data['personal_info'].get('github', ''))
 
-    # --- תמצית (הנקודה בסוף נשארת) ---
+    #  תמצית (הנקודה בסוף נשארת)
     if 'professional_summary' in data:
         add_tnr_heading(doc, t_summary)
         p = doc.add_paragraph()
         add_tnr_run(p, data['professional_summary'])
 
-    # --- השכלה ---
+    #  השכלה
     if 'education' in data:
         add_tnr_heading(doc, t_edu)
         for edu in data['education']:
@@ -203,7 +203,7 @@ def create_full_word_resume(json_filepath, output_filepath):
                     if note.strip():
                         add_bullet_point(doc, note, is_hebrew)
 
-    # --- מיומנויות ---
+    #  מיומנויות
     if 'skills' in data:
         add_tnr_heading(doc, t_skills)
         for category, skills_list in data['skills'].items():
@@ -213,7 +213,7 @@ def create_full_word_resume(json_filepath, output_filepath):
             skills_str = ", ".join(skills_list)
             add_bullet_point(doc, f"{clean_category}: {skills_str}", is_hebrew)
 
-    # --- פרויקטים ---
+    #  פרויקטים
     if 'projects' in data:
         add_tnr_heading(doc, t_proj)
         ml_header_done = False
@@ -240,7 +240,7 @@ def create_full_word_resume(json_filepath, output_filepath):
                 p.paragraph_format.keep_with_next = True
                 add_tnr_run(p, name.rstrip(':') + ":", bold=True)
                 
-                # תמיכה גם בירידת שורה (Enter) וגם בנקודה ורווח
+                # תמיכה גם בירידת שורה וגם בנקודה ורווח
                 lines = [line.strip() for line in desc.replace('\r\n', '\n').split('\n') if line.strip()]
                 for line in lines:
                     for part in line.split('. '):
@@ -248,7 +248,7 @@ def create_full_word_resume(json_filepath, output_filepath):
                         if clean_part:
                             add_bullet_point(doc, clean_part, is_hebrew)
 
-    # --- ניסיון ושירות צבאי ---
+    #  ניסיון ושירות צבאי
     if 'experience' in data:
         add_tnr_heading(doc, t_exp)
         for exp in data['experience']:
@@ -266,7 +266,7 @@ def create_full_word_resume(json_filepath, output_filepath):
             for bullet in exp['bullets']:
                 add_bullet_point(doc, bullet, is_hebrew)
 
-    # --- התנדבות ---
+    #  התנדבות
     if 'volunteering' in data:
         add_tnr_heading(doc, t_vol)
         for vol in data['volunteering']:
@@ -276,18 +276,17 @@ def create_full_word_resume(json_filepath, output_filepath):
             for bullet in vol['bullets']:
                 add_bullet_point(doc, bullet, is_hebrew)
 
-    # --- שפות ---
+    #  שפות
     if 'skills' in data and 'languages' in data['skills']:
         add_tnr_heading(doc, t_lang)
         for lang in data['skills']['languages']:
             p = doc.add_paragraph()
             add_tnr_run(p, lang)
 
-    # --- כיווניות ויישור לעברית ---
+    #  כיווניות ויישור לעברית
     if is_hebrew:
         for p in doc.paragraphs:
-            # שורת הקשר מזוהה לפי האובייקט עצמו (ולא לפי הטקסט!)
-            # אחרת שורת "Git/GitHub" במיומנויות נחשבה בטעות כשורת קשר
+            # שורת הקשר מזוהה לפי האובייקט עצמו
             if p._p is contact_p._p:
                 p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                 continue

@@ -1,72 +1,115 @@
-# מרכז את כל הלוגיקה, הפרומפטים והתקשורת מול מודל ה-AI
+# סוכן ה-AI להתאמה ודיוק של תקציר קורות החיים (OpenRouter / DeepSeek)
 
 import os
-import time
 from dotenv import load_dotenv
-from google import genai
-from google.genai.errors import ServerError, ClientError
+from openai import OpenAI
 
-load_dotenv()
+# טעינת המפתח מקובץ .env
+load_dotenv(override=True)
+api_key = os.getenv("DEEPSEEK_API_KEY")
 
-def generate_tailored_summary(original_summary, role, job_description, candidate_skills="", lang='he'):
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        raise ValueError("לא נמצא GEMINI_API_KEY בקובץ ה-.env")
-        
-    client = genai.Client(api_key=api_key)
-    
-    if lang == 'he':
-        lang_instruction = "בעברית מקצועית ותקנית לקורות חיים"
-        role_guide = """
-- איסור מוחלט על גוף שלישי: אלו קורות החיים שלי! אל תשתמש במילים 'היא', 'לה', 'שלה'. נסח ישירות: 'בעלת ניסיון...', 'משלבת שליטה ב-...'
-- שמירה על לשון נקבה טבעית (סטודנטית, מפתחת), ללא לוכסנים מגדריים כלל (ללא 'סטודנט/ית').
-- ללא אזכור מפורש של שם המשרה (כמו 'למשרת...' או 'מתאימה לתפקיד...').
-"""
-    else:
-        lang_instruction = "in fluent, impactful resume English"
-        role_guide = """
-- Write in first-person resume style (implied 'I', e.g., 'Results-driven student with solid experience in...', NEVER use third-person like 'She is' or 'Her skills').
-- Do not explicitly mention phrases like 'targeting the role of' or 'suitable for the position'.
-- Highlight relevant tools and strengths organically.
-"""
+# אתחול הלקוח מול OpenRouter עם הגבלת זמן של 20 שניות
+client = None
+if api_key:
+    try:
+        client = OpenAI(
+            api_key=api_key,
+            base_url="https://openrouter.ai/api/v1",
+            timeout=20.0
+        )
+    except Exception as e:
+        print("Warning: Failed to initialize OpenRouter Client:", e)
 
-    skills_context = f"\nארגז הכלים והטכנולוגיות:\n{candidate_skills}\n" if candidate_skills else ""
+
+def call_llm(prompt: str, provider: str = None) -> str:
+    """קריאה ישירה ל-DeepSeek דרך OpenRouter"""
+    print("\n[AI Agent] שולח קריאה ל-OpenRouter (DeepSeek)...")
+
+    if not client:
+        raise RuntimeError("לקוח ה-AI לא אותחל. בדקי את המפתח ב-.env")
+
+    try:
+        response = client.chat.completions.create(
+            model="deepseek/deepseek-chat",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.7
+        )
+        print("[AI Agent] התקבלה תשובה בהצלחה תוך שניות!")
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"\n[AI Error]: {e}\n")
+        raise e
+
+
+def generate_tailored_summary(original_summary, role, jd, candidate_skills, lang='he', provider=None):
+    lang_instruction = (
+        "התקציר חייב להיכתב בעברית מקצועית, טבעית ורהוטה."
+        if lang == 'he' else
+        "The summary must be written in professional, high-level Executive English."
+    )
 
     prompt = f"""
-אתה יועץ קריירה מומחה. תפקידך לנסח מחדש את פסקת התקציר (Professional Summary) של קורות החיים שלי, כך שתדגיש את החוזקות המתאימות ביותר לתחום המשרה.
+    אתה מומחה לכתיבת קורות חיים בכירים.
+    
+    משרת היעד: '{role}'.
+    תיאור ודרישות המשרה:
+    {jd}
+    
+    כישורי המועמדת:
+    {candidate_skills}
+    
+    התקציר המקורי:
+    "{original_summary}"
+    
+    הנחיות לביצוע:
+    1. שכתב את פסקת התקציר כך שתבליט את הניסיון, המיומנויות והחוזקות של המועמדת בהתאמה ישירה לדרישות המשרה.
+    2. כתיבה בגוף ראשון נסתר וישיר (ללא שימוש בכינויי גוף שלישי כמו "היא", "שלה", וללא לוכסנים מגדריים).
+    3. שמור על אמינות מלאה בהתאם לכישורים הקיימים וללא המצאת ניסיון פיקטיבי.
+    4. {lang_instruction}
+    5. החזר אך ורק את פסקת התקציר המשוכתבת, ללא הקדמות, מרכאות או הסברים נוספים.
+    """
 
-פרטי המשרה:
-- תחום: {role}
-- דרישות: {job_description}
+    try:
+        raw_result = call_llm(prompt, provider=provider)
+        tailored = raw_result.replace('"', '').replace('```', '').strip()
+        return tailored
+    except Exception as e:
+        print("Error during generate_tailored_summary:", e)
+        return original_summary
 
-הרקע שלי:
-- תקציר נוכחי: "{original_summary}"
-{skills_context}
 
-הנחיות קריטיות לסגנון:
-{role_guide}
-- מבנה: פסקה אחת חזקה, קוהרנטית ורציפה (3-4 משפטים) {lang_instruction}.
-- פלט נקי: החזר אך ורק את פסקת התקציר עצמה, ללא שום מירכאות, כותרות או הקדמות.
-"""
+def refine_tailored_summary(current_summary, feedback, role, jd, candidate_skills, lang='he', provider=None):
+    lang_instruction = (
+        "התקציר חייב להיכתב בעברית מקצועית וטבעית."
+        if lang == 'he' else
+        "The summary must be written in professional, high-level Executive English."
+    )
 
-    # שימוש במודל העדכני של גוגל
-    model_name = 'gemini-3.8-flash'
+    prompt = f"""
+    אתה מומחה לכתיבת קורות חיים בכירים.
+    
+    קיבלת תקציר קיים עבור המשרה: '{role}'.
+    תיאור ודרישות המשרה: {jd}
+    כישורי המועמדת: {candidate_skills}
+    
+    התקציר הנוכחי:
+    "{current_summary}"
+    
+    המשתמשת נתנה לך את המשוב וההנחיות הבאות לשיפור התקציר:
+    "{feedback}"
+    
+    הנחיות לביצוע:
+    1. שכתב ודייק את התקציר תוך יישום מדויק של הנחיות המשתמשת.
+    2. כתיבה בגוף ראשון נסתר וישיר (ללא שימוש בכינויי גוף שלישי כמו "היא", "שלה", וללא לוכסנים מגדריים).
+    3. שמור על אמינות בהתאם לכישורי המועמדת ולמשרת היעד.
+    4. {lang_instruction}
+    5. החזר אך ורק את פסקת התקציר המשוכתבת, ללא הקדמות, מרכאות או הסברים נוספים.
+    """
 
-    for attempt in range(3):
-        try:
-            response = client.models.generate_content(
-                model=model_name,
-                contents=prompt
-            )
-            return response.text.strip()
-        except ServerError:
-            time.sleep(2)
-            continue
-        except ClientError as e:
-            # אם יש עומס רגעי, המתנה וניסיון חוזר
-            if "429" in str(e) and attempt < 2:
-                time.sleep(2)
-                continue
-            raise e
-            
-    raise RuntimeError("לא ניתן היה להפיק תקציר כרגע. נסי שוב בעוד רגע.")
+    try:
+        raw_result = call_llm(prompt, provider=provider)
+        refined = raw_result.replace('"', '').replace('```', '').strip()
+        return refined
+    except Exception as e:
+        print("Error during refine_tailored_summary:", e)
+        return current_summary

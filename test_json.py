@@ -37,7 +37,7 @@ def real_ai_agent(resume_data, new_info):
     print(f"המידע שהמשתמש ביקש להוסיף:\n'{new_info}'\n")
     print("מעבד את הבקשה. זה עשוי לקחת כמה שניות...")
     
-    # כאן אנחנו בונים את הפרומפט (ההוראות לסוכן)   
+    # כאן אנחנו בונים את הפרומפט   
     # אנחנו מבקשים ממנו להחזיר לנו JSON תקין ולא סתם טקסט רגיל    
     prompt = f"""
     You are an AI resume updating agent. 
@@ -54,12 +54,12 @@ def real_ai_agent(resume_data, new_info):
     {json.dumps(resume_data, ensure_ascii=False)}
     """
     
-    # שליחת הבקשה למודל (בחרנו במודל פלאש שהוא מהיר ומעולה למשימות כאלה)   
+    # שליחת הבקשה למודל   
     response = client.models.generate_content(
         model='gemini-2.5-flash',
         contents=prompt,
         config=types.GenerateContentConfig(
-            # אנחנו מגדירים לו בכוח שהתשובה חייבת להיות בפורמט JSON            
+            #  נגדיר לו בכוח שהתשובה חייבת להיות בפורמט JSON            
             response_mime_type="application/json",
         )
     )
